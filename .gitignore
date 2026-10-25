@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+segmentiq.db
+segmentiq.db-*
+*.sqlite
+*.sqlite3
+.env
+.env.*
+!.env.example
+*.log
+frontend/node_modules/
+frontend/dist/

@@ -1,0 +1,97 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>SegmentIQ</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+:root{--bg:#f6f7fb;--card:#fff;--tx:#1b1f2a;--mut:#6b7280;--ac:#4f46e5;--bd:#e5e7eb}
+@media(prefers-color-scheme:dark){:root{--bg:#0f1117;--card:#181b24;--tx:#e8eaf0;--mut:#9aa1b0;--bd:#2a2e3a}}
+*{box-sizing:border-box}body{margin:0;font:15px system-ui,sans-serif;background:var(--bg);color:var(--tx)}
+header{padding:16px 24px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--bd);background:var(--card)}
+h1{font-size:20px;margin:0 auto 0 0}main{padding:24px;max-width:1100px;margin:auto}
+button{background:var(--ac);color:#fff;border:0;border-radius:8px;padding:8px 14px;cursor:pointer;font:inherit}
+button.g{background:transparent;color:var(--tx);border:1px solid var(--bd)}button.on{background:var(--ac);color:#fff}
+.tabs{display:flex;gap:8px;margin-bottom:16px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:16px}
+.stat{font-size:28px;font-weight:600}.mut{color:var(--mut);font-size:13px}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:8px;border-bottom:1px solid var(--bd)}
+.wrap{overflow-x:auto}input,select{padding:8px;border-radius:8px;border:1px solid var(--bd);background:var(--card);color:var(--tx);font:inherit}
+.tag{padding:2px 8px;border-radius:99px;background:var(--bd);font-size:12px}#msg{padding:8px 24px;color:var(--ac)}
+.hide{display:none}canvas{max-height:300px}
+</style></head><body>
+<header><h1>SegmentIQ</h1>
+<div id="adminTools" style="display:flex;gap:8px;flex-wrap:wrap">
+<button class="g" onclick="act('/api/load-sample','Sample data loaded')">Load sample data</button>
+<label class="g card" style="padding:7px 12px;cursor:pointer">Upload CSV<input type="file" id="f" hidden accept=".csv"></label>
+<button onclick="act('/api/segment','Segmentation complete')">Run segmentation</button></div>
+<span id="who" class="mut"></span>
+<button class="g" id="btnLogin">Log in</button><button class="g hide" id="btnLogout">Log out</button></header>
+<div id="msg"></div>
+<section id="myaccount" class="hide card" style="max-width:1100px;margin:24px auto"><h2>My account</h2><div id="accBody" class="mut">Loading…</div></section>
+<main id="adminMain"><div class="tabs"><button class="on" data-t="dash">Dashboard</button><button class="g" data-t="model">Model comparison</button><button class="g" data-t="cust">Customers</button><button class="g" data-t="camp">Campaigns</button></div>
+<section id="dash"><div class="grid" id="stats"></div><div class="grid" style="margin-top:16px">
+<div class="card"><b>Segment sizes</b><canvas id="c1"></canvas></div>
+<div class="card"><b>Clusters (PCA 2D)</b><canvas id="c2"></canvas></div>
+<div class="card"><b>Avg monetary value</b><canvas id="c3"></canvas></div></div>
+<div class="card wrap" style="margin-top:16px"><b>Segment profiles</b><table id="prof"></table></div></section>
+<section id="model" class="hide"><div class="grid"><div class="card"><b>K-Means elbow (inertia)</b><canvas id="c4"></canvas></div>
+<div class="card wrap"><b>Model metrics</b><p class="mut">Segments are assigned with K-Means; other models are for comparison only.</p><table id="mc"></table></div></div></section>
+<section id="cust" class="hide"><div style="display:flex;gap:8px;margin-bottom:12px"><input id="q" placeholder="Search"><select id="sf"></select></div>
+<div class="grid"><div class="card wrap" style="grid-column:span 2"><table id="ct"></table></div>
+<div class="card"><b>Customer inbox</b><div id="inbox" class="mut">Click a customer</div></div></div></section>
+<section id="camp" class="hide"><div class="card wrap" style="margin-bottom:16px"><b>Campaign history</b><table id="hist"></table></div><div class="grid" id="cc"></div></section></main>
+<script>
+const $=s=>document.querySelector(s),COL=['#4f46e5','#10b981','#f59e0b','#ef4444','#6b7280'];let ch={};
+let token=sessionStorage.getItem('siq_token')||'',role=sessionStorage.getItem('siq_role')||'';
+const say=t=>{$('#msg').textContent=t;setTimeout(()=>$('#msg').textContent='',4000)};
+async function api(u,o={}){const h={...(o.headers||{})};if(token)h.Authorization='Bearer '+token;
+ const r=await fetch(u,{...o,headers:h});let j;try{j=await r.json()}catch{j={}}
+ if(!r.ok){const d=j.detail;throw new Error(typeof d==='string'?d:'Error')}return j}
+async function act(u,t){try{const j=await api(u,{method:'POST'});say(t+' '+JSON.stringify(j));load()}catch(e){say(e.message)}}
+async function sendCamp(seg){try{const j=await api('/api/campaign/'+encodeURIComponent(seg),{method:'POST'});
+ say('Campaign sent '+JSON.stringify(j));load()}catch(e){if(String(e.message).includes('24h')&&confirm('Sent within 24h. Admin override?')){
+ await api('/api/campaign/'+encodeURIComponent(seg)+'?override=true',{method:'POST'});say('Campaign sent (override)');load()}else say(e.message)}}
+async function doLogin(){const email=prompt('Email (admin@segmentiq.com or c{id}@example.com)');if(!email)return;
+ const j=await api('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});
+ token=j.token;role=j.role;sessionStorage.setItem('siq_token',token);sessionStorage.setItem('siq_role',role);sessionStorage.setItem('siq_email',j.email);uiMode();role==='customer'?loadAccount():load()}
+function logout(){token=role='';['siq_token','siq_role','siq_email'].forEach(k=>sessionStorage.removeItem(k));uiMode();load()}
+function uiMode(){const cust=role==='customer';$('#adminMain').classList.toggle('hide',cust);$('#myaccount').classList.toggle('hide',!cust);
+ $('#adminTools').classList.toggle('hide',cust);$('#btnLogin').classList.toggle('hide',!!role);$('#btnLogout').classList.toggle('hide',!role);
+ $('#who').textContent=role?sessionStorage.getItem('siq_email'):'Not logged in (log in as admin to send campaigns)';}
+async function loadAccount(){const j=await api('/api/account');
+ $('#accBody').innerHTML=(j.notifications.map(n=>`<div class="card" style="margin:8px 0;opacity:${n.read_flag?0.65:1}"><b>${n.title}</b> ${n.read_flag?'(read)':''}<p>${n.message}</p>
+ <p class="mut">${n.created}</p>${n.read_flag?'':`<button class="g" onclick="markRead(${n.id})">Mark read</button>`}</div>`).join('')||'<p>No notifications yet.</p>')+
+ (j.coupons.length?'<h3>Coupons</h3><ul>'+j.coupons.map(c=>`<li><b>${c.code}</b> — ${c.discount}% (${c.created})</li>`).join('')+'</ul>':'')}
+async function markRead(id){await api('/api/notifications/'+id+'/read',{method:'POST'});loadAccount()}
+$('#btnLogin').onclick=doLogin;$('#btnLogout').onclick=logout;
+$('#f').onchange=async e=>{const fd=new FormData();fd.append('file',e.target.files[0]);
+ try{const j=await api('/api/upload',{method:'POST',body:fd});say('Uploaded '+j.customers+' customers. Now run segmentation.');load()}catch(x){say(x.message)}};
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tabs button').forEach(x=>x.className='g');b.className='on';
+ ['dash','model','cust','camp'].forEach(t=>$('#'+t).classList.toggle('hide',t!=b.dataset.t));if(b.dataset.t==='model')loadModel()});
+function draw(id,cfg){ch[id]&&ch[id].destroy();ch[id]=new Chart($('#'+id),cfg)}
+async function loadModel(){try{const m=await api('/api/model-comparison');
+ draw('c4',{type:'line',data:{labels:m.elbow.map(x=>'k='+x.k),datasets:[{label:'Inertia',data:m.elbow.map(x=>x.inertia),borderColor:COL[0],fill:false}]},options:{plugins:{legend:{display:false}}}});
+ const rows=Object.entries(m.models).map(([n,v])=>`<tr><td><b>${n}</b></td><td>${v.n_clusters}</td><td>${v.silhouette??'—'}</td><td>${v.davies_bouldin??'—'}</td></tr>`).join('');
+ $('#mc').innerHTML='<tr><th>Model</th><th>Clusters</th><th>Silhouette ↑</th><th>Davies-Bouldin ↓</th></tr>'+rows}catch(e){say(e.message)}}
+async function load(){const s=await api('/api/summary'),sg=s.segments,nm=sg.map(x=>x.segment);
+ $('#stats').innerHTML=`<div class="card"><div class="mut">Customers</div><div class="stat">${s.total}</div></div>
+ <div class="card"><div class="mut">Segments (k)</div><div class="stat">${s.meta.k||'-'}</div></div>
+ <div class="card"><div class="mut">Notifications sent</div><div class="stat">${s.sent}</div></div>
+ <div class="card"><div class="mut">Silhouette by k</div><div>${s.meta.silhouette||'-'}</div></div>`;
+ draw('c1',{type:'doughnut',data:{labels:nm,datasets:[{data:sg.map(x=>x.n),backgroundColor:COL}]}});
+ draw('c2',{type:'scatter',data:{datasets:nm.map((n,i)=>({label:n,backgroundColor:COL[i],pointRadius:3,data:s.points.filter(p=>p.segment==n)}))}});
+ draw('c3',{type:'bar',data:{labels:nm,datasets:[{label:'Avg spend',data:sg.map(x=>x.monetary),backgroundColor:COL}]},options:{plugins:{legend:{display:false}}}});
+ $('#prof').innerHTML='<tr><th>Segment</th><th>Customers</th><th>Recency (days)</th><th>Frequency</th><th>Monetary</th></tr>'+sg.map(x=>`<tr><td><b>${x.segment}</b></td><td>${x.n}</td><td>${x.recency}</td><td>${x.frequency}</td><td>${x.monetary}</td></tr>`).join('');
+ $('#sf').innerHTML='<option value="">All segments</option>'+nm.map(n=>`<option>${n}</option>`).join('');
+ const hist=await api('/api/campaigns');
+ $('#hist').innerHTML='<tr><th>When</th><th>Segment</th><th>Customers</th><th>Discount</th></tr>'+
+ (hist.map(h=>`<tr><td>${h.sent_at}</td><td>${h.segment}</td><td>${h.num_customers}</td><td>${h.discount}%</td></tr>`).join('')||'<tr><td colspan="4" class="mut">No campaigns yet.</td></tr>');
+ $('#cc').innerHTML=sg.map(x=>`<div class="card"><span class="tag">${x.segment}</span> <span class="mut">${x.n} customers</span>
+ <h3>${x.action[0]}</h3><p>${x.action[1]}</p><p class="mut">Discount: ${x.action[2]}%</p><button onclick="sendCamp('${x.segment}')">Send to segment</button></div>`).join('')||'<p class="mut">Run segmentation first.</p>';
+ cust()}
+async function cust(){const l=await api(`/api/customers?segment=${encodeURIComponent($('#sf').value)}&q=${encodeURIComponent($('#q').value)}`);
+ $('#ct').innerHTML='<tr><th>ID</th><th>Email</th><th>Recency</th><th>Freq</th><th>Spend</th><th>Segment</th></tr>'+
+ l.map(c=>`<tr style="cursor:pointer" onclick="ib(${c.id})"><td>${c.id}</td><td>${c.email}</td><td>${c.recency.toFixed(0)}</td><td>${c.frequency.toFixed(0)}</td><td>${c.monetary.toFixed(0)}</td><td><span class="tag">${c.segment||'-'}</span></td></tr>`).join('')}
+async function ib(id){const j=await api(`/api/customers/${id}/inbox`);
+ $('#inbox').innerHTML=`<p class="mut">Customer ${id}</p>`+(j.notifications.map(n=>`<p><b>${n.title}</b><br>${n.message}</p>`).join('')||'No notifications yet')+
+ (j.coupons.length?'<p class="mut">Coupons: '+j.coupons.map(c=>`${c.code} (${c.discount}%)`).join(', ')+'</p>':'')}
+$('#q').oninput=cust;$('#sf').onchange=cust;uiMode();role==='customer'?loadAccount():load();
+</script></body></html>
